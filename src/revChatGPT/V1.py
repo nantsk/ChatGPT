@@ -6,7 +6,6 @@ from __future__ import annotations
 import base64
 import binascii
 import contextlib
-import datetime
 import json
 import logging
 import time
@@ -114,7 +113,7 @@ class Chatbot:
         Raises:
             Exception: _description_
         """
-        user_home = getenv("HOME")
+        user_home = getenv("HOME") or getenv("USERPROFILE")
         if user_home is None:
             user_home = Path().cwd()
             self.cache_path = Path(Path().cwd(), ".chatgpt_cache.json")
@@ -477,16 +476,21 @@ class Chatbot:
                         "Conversation ID %s not found in conversation mapping, try to get conversation history for the given ID",
                         conversation_id,
                     )
-                    with contextlib.suppress(Exception):
+                    try:
                         history = self.get_msg_history(conversation_id)
                         self.conversation_mapping[conversation_id] = history[
                             "current_node"
                         ]
+                    except requests.exceptions.HTTPError:
+                        print("Conversation unavailable")
                 else:
                     self.__map_conversations()
             if conversation_id in self.conversation_mapping:
                 parent_id = self.conversation_mapping[conversation_id]
-            else:  # invalid conversation_id provided, treat as a new conversation
+            else:
+                print(
+                    "Warning: Invalid conversation_id provided, treat as a new conversation"
+                )
                 conversation_id = None
                 parent_id = str(uuid.uuid4())
 
@@ -704,7 +708,7 @@ class Chatbot:
         self.__check_response(response)
         if encoding is not None:
             response.encoding = encoding
-        return json.loads(response.text)
+        return response.json()
 
     @logger(is_timed=True)
     def gen_title(self, convo_id: str, message_id: str) -> str:
@@ -815,9 +819,7 @@ class AsyncChatbot(Chatbot):
         )
 
         # overwrite inherited normal session with async
-        headers_transfer = self.session.headers
-        self.session = requests.AsyncSession()
-        self.session.headers = headers_transfer
+        self.session = AsyncClient(headers=self.session.headers)
 
     async def __send_request(
         self,
@@ -1226,7 +1228,6 @@ def configure() -> dict:
         config_files.append(Path(user_home, ".config/revChatGPT/config.json"))
     if windows_home := getenv("HOMEPATH"):
         config_files.append(Path(f"{windows_home}/.config/revChatGPT/config.json"))
-
     if config_file := next((f for f in config_files if f.exists()), None):
         with open(config_file, encoding="utf-8") as f:
             config = json.load(f)
